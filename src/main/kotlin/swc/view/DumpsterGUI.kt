@@ -1,12 +1,16 @@
 package swc.view
 
 import com.azure.digitaltwins.core.implementation.models.ErrorResponseException
+import com.google.gson.Gson
+import com.google.gson.JsonObject
+import swc.azure.AzureAuthentication
 import swc.azure.AzureDTManager
 import swc.entities.Dumpster
-import swc.entities.Volume
 import java.awt.*
-import java.util.concurrent.Executors
+import java.awt.event.ItemEvent
+import java.awt.event.ItemListener
 import javax.swing.*
+import javax.swing.event.ChangeListener
 
 class CustomTextArea(content: String): JTextPane() {
     init {
@@ -38,12 +42,31 @@ class CustomComboBox(defaultValue: Boolean): JComboBox<Boolean>(arrayOf(true, fa
 class CustomDimension: Dimension(300, 30)
 
 class DumpsterGUI(frame: JFrame): JPanel() {
-    private var dumpster: Dumpster? = null
-    private var panel: JComponent? = null
+    private lateinit var dumpster: Dumpster
+    private lateinit var panel: JComponent
 
-    private var isOpenComboBox: JComboBox<Boolean>? = null
-    private var isWorkingComboBox: JComboBox<Boolean>? = null
-    private var occupiedVolumeSpinner: JSpinner? = null
+    private lateinit var isOpenComboBox: JComboBox<Boolean>
+    private lateinit var isWorkingComboBox: JComboBox<Boolean>
+    private lateinit var occupiedVolumeSpinner: JSpinner
+
+    private val processor = AzureAuthentication.queueProcessorClient {
+        // Consume message only if it's related to this dumpster's ID
+        when (it.message.applicationProperties["cloudEvents:subject"]) {
+            dumpster.id -> {
+                val patch = Gson()
+                    .fromJson(it.message.body.toString(), JsonObject::class.java)["patch"]
+                    .asJsonArray.first().asJsonObject
+                val value = patch["value"]
+                when (patch["path"].asString) {
+                    "/occupiedVolume" -> occupiedVolumeSpinner.value = value.toString().toDouble()
+                    "/open" -> isOpenComboBox.selectedItem = value.toString().toBoolean()
+                    "/working" -> isWorkingComboBox.selectedItem = value.toString().toBoolean()
+                }
+                it.complete()
+            }
+            else -> it.abandon()
+        }
+    }
 
     init {
         layout = BorderLayout()
@@ -52,39 +75,13 @@ class DumpsterGUI(frame: JFrame): JPanel() {
         try {
             dumpster = AzureDTManager.getDumpsterById(dumpsterId)
             showDigitalTwin()
-            // Update DIGITAL TWIN
-            updateDigitalTwin()
-            updatePhysicalAsset()
         } catch (_: ErrorResponseException) {
             panel = CustomTextArea("Dumpster Not Found")
         }
 
-        add(panel!!, BorderLayout.CENTER)
-    }
+        add(panel, BorderLayout.CENTER)
 
-    private fun updateDigitalTwin() = Executors.newSingleThreadExecutor().execute {
-        while(true){
-            val isWorking = isWorkingComboBox?.selectedItem.toString().toBoolean()
-            val isOpen = isOpenComboBox?.selectedItem.toString().toBoolean()
-            val occupiedVolume = Volume(occupiedVolumeSpinner?.value.toString().toDouble())
-            if (dumpster?.isWorking != isWorking || dumpster?.isOpen != isOpen || dumpster?.occupiedVolume != occupiedVolume) {
-                dumpster?.isWorking = isWorking
-                dumpster?.isOpen = isOpen
-                dumpster?.occupiedVolume = occupiedVolume
-                AzureDTManager.updateDigitalTwin(dumpster!!)
-            }
-            Thread.sleep(500)
-        }
-    }
-
-    private fun updatePhysicalAsset() = Executors.newSingleThreadExecutor().execute {
-        while(true){
-            dumpster = AzureDTManager.getDumpsterById(dumpster!!.id)
-            isWorkingComboBox?.selectedItem = dumpster?.isWorking
-            isOpenComboBox?.selectedItem = dumpster?.isOpen
-            occupiedVolumeSpinner?.value = dumpster?.occupiedVolume?.value
-            Thread.sleep(500)
-        }
+        processor.start()
     }
 
     private fun showDigitalTwin() {
@@ -93,22 +90,35 @@ class DumpsterGUI(frame: JFrame): JPanel() {
         val title = CustomTextArea("Dumpster Physical Asset")
         title.componentOrientation = ComponentOrientation.RIGHT_TO_LEFT
         vbox.add(title)
-        vbox.add(CustomTextArea("ID: ${dumpster?.id}"))
-        vbox.add(CustomTextArea("Size: ${dumpster?.dumpsterType?.size?.dimension}"))
-        vbox.add(CustomTextArea("Capacity (liters): ${dumpster?.dumpsterType?.size?.capacity}"))
-        vbox.add(CustomTextArea("Waste Name: ${dumpster?.dumpsterType?.typeOfOrdinaryWaste?.wasteName}"))
+        vbox.add(CustomTextArea("ID: ${dumpster.id}"))
+        vbox.add(CustomTextArea("Size: ${dumpster.dumpsterType.size.dimension}"))
+        vbox.add(CustomTextArea("Capacity (liters): ${dumpster.dumpsterType.size.capacity}"))
+        vbox.add(CustomTextArea("Waste Name: ${dumpster.dumpsterType.typeOfOrdinaryWaste.wasteName}"))
 
-        isOpenComboBox = CustomComboBox(dumpster!!.isOpen)
-        vbox.add(CustomFormElement("isOpen:", isOpenComboBox!!))
+        isOpenComboBox = CustomComboBox(dumpster.isOpen)
+        isOpenComboBox.addItemListener {
+            if (it.stateChange == ItemEvent.SELECTED) {
+                AzureDTManager.updateOpenProperty(dumpster.id, it.item.toString().toBoolean())
+            }
+        }
+        vbox.add(CustomFormElement("isOpen:", isOpenComboBox))
 
-        isWorkingComboBox = CustomComboBox(dumpster!!.isWorking)
-        vbox.add(CustomFormElement("isWorking:", isWorkingComboBox!!))
+        isWorkingComboBox = CustomComboBox(dumpster.isWorking)
+        isWorkingComboBox.addItemListener {
+            if (it.stateChange == ItemEvent.SELECTED) {
+                AzureDTManager.updateWorkingProperty(dumpster.id, it.item.toString().toBoolean())
+            }
+        }
+        vbox.add(CustomFormElement("isWorking:", isWorkingComboBox))
 
-        occupiedVolumeSpinner = JSpinner(SpinnerNumberModel(dumpster?.occupiedVolume?.value, 0.0, dumpster?.dumpsterType?.size?.capacity, 0.1))
-        occupiedVolumeSpinner?.minimumSize = CustomDimension()
-        occupiedVolumeSpinner?.preferredSize = CustomDimension()
-        occupiedVolumeSpinner?.maximumSize = CustomDimension()
-        vbox.add(CustomFormElement("Occupied Volume (liters):", occupiedVolumeSpinner!!))
+        occupiedVolumeSpinner = JSpinner(SpinnerNumberModel(dumpster.occupiedVolume.value, 0.0, dumpster.dumpsterType.size.capacity, 0.1))
+        occupiedVolumeSpinner.minimumSize = CustomDimension()
+        occupiedVolumeSpinner.preferredSize = CustomDimension()
+        occupiedVolumeSpinner.maximumSize = CustomDimension()
+        occupiedVolumeSpinner.addChangeListener {
+            AzureDTManager.updateOccupiedVolumeProperty(dumpster.id, occupiedVolumeSpinner.value.toString().toDouble())
+        }
+        vbox.add(CustomFormElement("Occupied Volume (liters):", occupiedVolumeSpinner))
 
         dtPanel.layout = BoxLayout(dtPanel, BoxLayout.Y_AXIS)
         dtPanel.add(vbox)

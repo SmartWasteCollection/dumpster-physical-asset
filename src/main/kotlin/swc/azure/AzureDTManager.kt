@@ -9,13 +9,16 @@ object AzureDTManager {
     fun getDumpsterById(id: String) =
         parse(AzureAuthentication.authClient.getDigitalTwin(id, String::class.java)).toDumpster()
 
-    fun updateDigitalTwin(dumpster: Dumpster) {
-        val updateTwinData = JsonPatchDocument()
-        updateTwinData.appendReplace("/occupiedVolume", dumpster.occupiedVolume.value)
-        updateTwinData.appendReplace("/working", dumpster.isWorking)
-        updateTwinData.appendReplace("/open", dumpster.isOpen)
+    fun updateOccupiedVolumeProperty(dumpsterId: String, newVolume: Double) =
+        AzureAuthentication.authClient.updateDigitalTwin(dumpsterId,
+            JsonPatchDocument().appendReplace("/occupiedVolume", newVolume))
 
-        AzureAuthentication.authClient.updateDigitalTwin(dumpster.id, updateTwinData)
-    }
+    fun updateOpenProperty(dumpsterId: String, isOpen: Boolean) =
+        AzureAuthentication.authClient.updateDigitalTwin(dumpsterId,
+            JsonPatchDocument().appendReplace("/open", isOpen))
+
+    fun updateWorkingProperty(dumpsterId: String, isWorking: Boolean) =
+        AzureAuthentication.authClient.updateDigitalTwin(dumpsterId,
+            JsonPatchDocument().appendReplace("/working", isWorking))
 
 }
