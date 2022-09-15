@@ -3,12 +3,19 @@ package swc.view
 import com.azure.digitaltwins.core.implementation.models.ErrorResponseException
 import com.google.gson.Gson
 import com.google.gson.JsonObject
+import com.nimbusds.openid.connect.sdk.assurance.evidences.Occupation
+import io.github.cdimascio.dotenv.dotenv
 import swc.azure.AzureAuthentication
 import swc.azure.AzureDTManager
 import swc.entities.Dumpster
 import java.awt.*
 import java.awt.event.ItemEvent
 import java.awt.event.ItemListener
+import java.net.URI
+import java.net.http.HttpClient
+import java.net.http.HttpRequest
+import java.net.http.HttpRequest.BodyPublishers
+import java.net.http.HttpResponse
 import javax.swing.*
 import javax.swing.event.ChangeListener
 
@@ -57,6 +64,7 @@ class DumpsterGUI(frame: JFrame): JPanel() {
                     .fromJson(it.message.body.toString(), JsonObject::class.java)["patch"]
                     .asJsonArray.first().asJsonObject
                 val value = patch["value"]
+                println(patch)
                 when (patch["path"].asString) {
                     "/occupiedVolume" -> occupiedVolumeSpinner.value = value.toString().toDouble()
                     "/open" -> isOpenComboBox.selectedItem = value.toString().toBoolean()
@@ -111,17 +119,32 @@ class DumpsterGUI(frame: JFrame): JPanel() {
         }
         vbox.add(CustomFormElement("isWorking:", isWorkingComboBox))
 
-        occupiedVolumeSpinner = JSpinner(SpinnerNumberModel(dumpster.occupiedVolume.value, 0.0, dumpster.dumpsterType.size.capacity, 0.1))
+        occupiedVolumeSpinner = JSpinner(SpinnerNumberModel(dumpster.occupiedVolume.value, 0.0, dumpster.dumpsterType.size.capacity, 0.5))
         occupiedVolumeSpinner.minimumSize = CustomDimension()
         occupiedVolumeSpinner.preferredSize = CustomDimension()
         occupiedVolumeSpinner.maximumSize = CustomDimension()
         occupiedVolumeSpinner.addChangeListener {
-            AzureDTManager.updateOccupiedVolumeProperty(dumpster.id, occupiedVolumeSpinner.value.toString().toDouble())
+            val occupiedVolume = occupiedVolumeSpinner.value.toString().toDouble()
+            println(occupiedVolume)
+            AzureDTManager.updateOccupiedVolumeProperty(dumpster.id, occupiedVolume)
+            checkAvailability(occupiedVolume)
         }
         vbox.add(CustomFormElement("Occupied Volume (liters):", occupiedVolumeSpinner))
 
         dtPanel.layout = BoxLayout(dtPanel, BoxLayout.Y_AXIS)
         dtPanel.add(vbox)
         panel = dtPanel
+    }
+
+    fun checkAvailability(occupiedVolume: Double) {
+        if (occupiedVolume > (dumpster.dumpsterType.size.capacity * 0.75)) {
+            val client = HttpClient.newBuilder().build()
+            val request = HttpRequest.newBuilder()
+                .uri(URI.create(dotenv()["MISSION_MICROSERVICE"] + "ordinary"))
+                .POST(BodyPublishers.ofString(dumpster.id))
+                .build()
+            val response = client.send(request, HttpResponse.BodyHandlers.ofString())
+            println(response.body())
+        }
     }
 }
