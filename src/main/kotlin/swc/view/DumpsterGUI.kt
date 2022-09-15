@@ -3,21 +3,18 @@ package swc.view
 import com.azure.digitaltwins.core.implementation.models.ErrorResponseException
 import com.google.gson.Gson
 import com.google.gson.JsonObject
-import com.nimbusds.openid.connect.sdk.assurance.evidences.Occupation
-import io.github.cdimascio.dotenv.dotenv
 import swc.azure.AzureAuthentication
 import swc.azure.AzureDTManager
 import swc.entities.Dumpster
 import java.awt.*
 import java.awt.event.ItemEvent
-import java.awt.event.ItemListener
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpRequest.BodyPublishers
 import java.net.http.HttpResponse
+import java.util.UUID
 import javax.swing.*
-import javax.swing.event.ChangeListener
 
 class CustomTextArea(content: String): JTextPane() {
     init {
@@ -114,7 +111,9 @@ class DumpsterGUI(frame: JFrame): JPanel() {
         isWorkingComboBox = CustomComboBox(dumpster.isWorking)
         isWorkingComboBox.addItemListener {
             if (it.stateChange == ItemEvent.SELECTED) {
-                AzureDTManager.updateWorkingProperty(dumpster.id, it.item.toString().toBoolean())
+                val isWorking = it.item.toString().toBoolean()
+                AzureDTManager.updateWorkingProperty(dumpster.id, isWorking)
+                if (!isWorking) sendComplaint()
             }
         }
         vbox.add(CustomFormElement("isWorking:", isWorkingComboBox))
@@ -136,15 +135,35 @@ class DumpsterGUI(frame: JFrame): JPanel() {
         panel = dtPanel
     }
 
-    fun checkAvailability(occupiedVolume: Double) {
+    private fun checkAvailability(occupiedVolume: Double) {
         if (occupiedVolume > (dumpster.dumpsterType.size.capacity * 0.75)) {
             val client = HttpClient.newBuilder().build()
             val request = HttpRequest.newBuilder()
-                .uri(URI.create(dotenv()["MISSION_MICROSERVICE"] + "ordinary"))
+                .uri(URI.create("http://localhost:3004/missions/ordinary"))
                 .POST(BodyPublishers.ofString(dumpster.id))
                 .build()
             val response = client.send(request, HttpResponse.BodyHandlers.ofString())
-            println(response.body())
+            println("Mission Created! Id: ${response.body()}.")
         }
+    }
+
+    private fun sendComplaint() {
+        val client = HttpClient.newBuilder().build()
+        val jsonObject = JsonObject()
+        jsonObject.addProperty("id", UUID.randomUUID().toString())
+        jsonObject.addProperty("ownerId", dumpster.id)
+        jsonObject.addProperty("title", "A dumpster stopped working.")
+        jsonObject.addProperty("issuer", "DUMPSTER")
+        jsonObject.addProperty("message", "Dumpster with id '${dumpster.id}' is not working.")
+        jsonObject.addProperty("status", "OPEN")
+
+        println(jsonObject.toString())
+        val request = HttpRequest.newBuilder()
+            .header("Content-Type", "application/json")
+            .uri(URI.create("http://localhost:3003/complaints"))
+            .POST(BodyPublishers.ofString(jsonObject.toString()))
+            .build()
+        val response = client.send(request, HttpResponse.BodyHandlers.ofString())
+        println("Complaint Created! Id: ${response.body()}.")
     }
 }
