@@ -25,6 +25,10 @@ tasks.test {
     useJUnitPlatform()
 }
 
+application {
+    mainClass.set("swc.AppKt")
+}
+
 tasks.withType<KotlinCompile> {
     kotlinOptions.jvmTarget = "11"
 }

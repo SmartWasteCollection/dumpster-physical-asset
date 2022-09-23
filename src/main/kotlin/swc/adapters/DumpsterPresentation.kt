@@ -56,7 +56,7 @@ object DumpsterDeserialization {
         this.toVolume()
     )
 
-    fun parse(json: String): JsonObject = JsonParser().parse(json).asJsonObject
+    fun parse(json: String): JsonObject = JsonParser.parseString(json).asJsonObject
 
     private fun JsonObject.toSize() = Size.from(
         this.getAsJsonPrimitive(DumpsterPropertyNames.CAPACITY)
