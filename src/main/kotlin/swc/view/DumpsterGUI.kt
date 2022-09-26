@@ -118,12 +118,13 @@ class DumpsterGUI(frame: JFrame): JPanel() {
         }
         vbox.add(CustomFormElement("isWorking:", isWorkingComboBox))
 
-        occupiedVolumeSpinner = JSpinner(SpinnerNumberModel(dumpster.occupiedVolume.value, 0.0, dumpster.dumpsterType.size.capacity, 0.5))
+        occupiedVolumeSpinner = JSpinner(SpinnerNumberModel(dumpster.occupiedVolume.value, 0.0, dumpster.dumpsterType.size.capacity, 1))
+        occupiedVolumeSpinner.value = dumpster.occupiedVolume.value
         occupiedVolumeSpinner.minimumSize = CustomDimension()
         occupiedVolumeSpinner.preferredSize = CustomDimension()
         occupiedVolumeSpinner.maximumSize = CustomDimension()
-        occupiedVolumeSpinner.addChangeListener {
-            val occupiedVolume = occupiedVolumeSpinner.value.toString().toDouble()
+        occupiedVolumeSpinner.addChangeListener {e ->
+            val occupiedVolume = (e.source as JSpinner).value.toString().toDouble()
             println(occupiedVolume)
             AzureDTManager.updateOccupiedVolumeProperty(dumpster.id, occupiedVolume)
             checkAvailability(occupiedVolume)
